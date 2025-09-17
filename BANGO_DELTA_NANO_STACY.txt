@@ -1,0 +1,439 @@
+LYRIAN KORR
+8/28/2025
+11:54AM
+
+####	WARNING: YOU CAN BREAK YOUR SH#T IF YOU DISABLE THE WRONG SERVICES. I DID. 
+####    	MULTIPLE FACTORY RESETS AND FRESH BOOT SETUPS HAVE BEEN REQUIRED ON MY END.
+####			THROUGHOUT THIS PROCESS, I HAVE BEEN LOGGING MOST OF MY WORK AND BACKING IT UP TO EXTERNAL STORAGE.
+####				DO YOUR RESEARCH -- I DID NOT. I JUST STARTED BREAKING THINGS.
+####					SOME OF THE SCRIPTS I AM GOING TO DROP CAN AND WILL NUKE YOUR ENTIRE SYSTEM.
+####				ALWAYS BE SURE TO CREATE RESTORE POINTS, ROLLBACKS, BACKUPS, AND FALLBACKS.
+####			I DIDN'T DO ANY OF THESE THINGS AT FIRST. LUCKILY, I WISED UP QUICK.
+####		I STILL HAD TO SACRIFICE A LOT OF DATA, COLLECTED EVIDENCE, VIDEO DOCUMENTATION, ETC.
+####	DON'T BE LIKE ME, DO YOUR RESEARCH BEFORE EXECUTING POWERSHELL SCRIPTS.
+
+# BANGO DELTA NANO STACY (bDNS)
+
+# DISABLE UNUSED SERVICES AND PORTS
+#______________________________________________
+#USE TO LIST AND DISABLE NON-ESSENTIAL SERVICES
+
+#POWERSHELL
+
+GET-SERVICE | WHERE-OBJECT { $_.STATUS -EQ 'RUNNING' } | SORT-OBJECT DISPLAYN
+
+#______________________________________________
+#DISABLE SELECTIVELY
+#______________________________________________
+SET-SERVICE -NAME "SERVICENAME" -STARTUPTYPE DISABLED
+STOP-SERVICE -NAME "SERVICENAME"
+
+
+#EXAMPLE:	REMOTEREGISTRY
+#		FAX
+#		XBLGAMESAVE
+#		DIAGTRACK
+#		WMPNETWORKSVC
+#               ETC
+#______________________________________________
+#GROUP POLICY: LOCK DOWN PORTS
+#______________________________________________
+#OPEN GPEDIT.MSC
+
+#NAVIGATE TO:
+
+#	COMPUTER CONFIGURATION > WINDOWS SETTINGS > SECURITY SETTINGS >
+#	> WINDOWS FIREWALL WITH ADVANCED SECURITY
+
+#CREATE INBOUND AND OUTBOUND TRAFFIC RULES:
+#	BLOCK ALL TRAFFIC BY DEFAULT
+#	WHITELIST ONLY TRUSTED APPS AND PORTS (443 FOR HTTPS, 853 FOR DNS OVER TLS)
+
+#______________________________________________
+#WINDOWS DEFENDER FIREWALL: BLOCK BY DEFAULT
+#______________________________________________
+#POWERSHELL SETUP:
+
+SET-NETFIREWALLPROFILE -PROFILE DOMAIN,PUBLIC,PRIVATE -DEFAULTINBOUNDACTION BLOCK -DEFAULTOUTBOUNDACTION BLOCK
+
+#ALLOW TRUSTED OUTBOUND:
+
+NEW-NETFIREWALLRULE -DISPLAYNAME "ALLOW HTTPS OUTBOUND" -DIRECTION OUTBOUND -PROTOCOL TCP -LOCALPORT ANY -REMOTEPORT 443 -ACTION ALLOW
+
+#CREATE SPECIFIC RULES FOR SPECIFIC APP:
+
+NEW-NETFIREWALLRULE -PROGRAM "FILEPATH" -ACTION ALLOW -DIRECTION OUTBOUND -PROFILE ANY
+
+#_____________________________________________
+#LOCAL DNS RESOLVER WIHT DNSSEC (UNBOUND)
+#______________________________________________
+#INSTALL UNBOUND (windows)
+#-DOWNLOAD FROM NLNETLABS
+#	https://nlnetlabs.nl/downloads/unbound/
+#-CONFIGURE service.CONF
+
+	SERVER:
+		VERBOSITY: 1
+		INTERFACE: 127.0.0.1
+		PORT:	   53
+		DO-IP4:    YES
+		DO-IP6:    NO
+		DO-UDP:    YES
+		DO-TCP:    YES
+		HIDE-IDENTITY: YES
+		HIDE-VERSION:  YES
+		HARDEN-GLUE:   YES
+		HARDEN-DNSSEC-STRIPPED: YES
+		USE-CAPS-FOR-ID:	YES
+		CACHE-MIN-TTL:		3600
+		CACHE-MAX-TTL:		86400
+		PREFETCH:	    YES
+		QNAME-MINIMISATION: YES
+		RRSET-ROUNDROBIN:   YES
+		VAL-PERMISSIVE-MODE:  NO
+		VAL-CLEAN-ADDITIONAL: YES
+		AUTO-TRUST-ANCHOR-FILE: "ROOT.KEY"
+
+#SET DNS TO LOCALHOST
+
+#- GO TO NETWORK & INTERNET SETTINGS > ADAPTER PROPERTIES
+#- SET DNS TO 127.0.0.1
+#- DISABLE IPV6 IF NOT NEEDED
+
+#_____________________________________________
+#unbound (windows)
+#_____________________________________________
+
+#🛠️ Default Setup Path
+#Unbound typically installs to:
+
+#Code
+#C:\Program Files\Unbound\
+#Inside, you should see:
+
+#unbound.exe — the main binary
+
+#service.conf — the default config file
+
+#root.hints — optional, for recursive resolution
+
+#root.key — for DNSSEC validation (can be generated)
+
+#🔧 Step-by-Step: Hardened Setup
+#1. Generate DNSSEC Trust Anchor
+#Open Command Prompt as admin:
+
+#cmd
+cd "C:\Program Files\Unbound"
+unbound-anchor.exe -a "C:\Program Files\Unbound\root.key"
+This creates the trust anchor for DNSSEC.
+
+#2. Edit service.conf
+#Open service.conf in Notepad and replace its contents with this stealth-hardened config:
+
+#conf
+#You can download root.hints from internic.net and save it to the Unbound folder.
+
+#3. Start the Service
+#Still in admin Command Prompt:
+
+#cmd
+unbound.exe -c "C:\Program Files\Unbound\service.conf"
+#Or install it as a Windows service if you want it persistent.
+
+#4. Set DNS to 127.0.0.1
+#In your network adapter settings:
+
+#Set DNS to 127.0.0.1
+
+#Remove any other DNS entries
+
+#This routes all DNS queries through your hardened Unbound instance.
+
+server:
+    verbosity: 1
+    interface: 127.0.0.1
+    port: 53
+    access-control: 127.0.0.0/8 allow
+    do-ip4: yes
+    do-ip6: no
+    do-udp: yes
+    do-tcp: yes
+    hide-version: yes
+    hide-identity: yes
+    harden-glue: yes
+    harden-dnssec-stripped: yes
+    harden-algo-downgrade: yes
+    qname-minimisation: yes
+    root-hints: "C:\\Program Files\\Unbound\\root.hints"
+    auto-trust-anchor-file: "C:\\Program Files\\Unbound\\root.key"
+    val-permissive-mode: no
+    module-config: "validator iterator"
+
+
+forward-zone:
+    name: "."
+    forward-tls-upstream: yes
+    forward-addr: 1.1.1.1@853        # Cloudflare
+    forward-addr: 9.9.9.9@853        # Quad9
+    forward-addr: 194.242.2.2@853    # DNS.SB (privacy-focused)
+
+#______________________________________________
+#SILENCE NOISY PORTS
+#______________________________________________
+
+Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\Windows NT\DNSClient" -Name "EnableMulticast" -Value 0
+
+# Block UDP Port 5353 (mDNS) - Inbound
+New-NetFirewallRule -DisplayName "Block mDNS Inbound" `
+    -Direction Inbound `
+    -Protocol UDP `
+    -LocalPort 5353 `
+    -Action Block `
+    -Profile Any
+
+# Block UDP Port 5353 (mDNS) - Outbound
+New-NetFirewallRule -DisplayName "Block mDNS Outbound" `
+    -Direction Outbound `
+    -Protocol UDP `
+    -LocalPort 5353 `
+    -Action Block `
+    -Profile Any
+
+# Block UDP Port 5355 (LLMNR) - Inbound
+New-NetFirewallRule -DisplayName "Block LLMNR Inbound" `
+    -Direction Inbound `
+    -Protocol UDP `
+    -LocalPort 5355 `
+    -Action Block `
+    -Profile Any
+
+# Block UDP Port 5355 (LLMNR) - Outbound
+New-NetFirewallRule -DisplayName "Block LLMNR Outbound" `
+    -Direction Outbound `
+    -Protocol UDP `
+    -LocalPort 5355 `
+    -Action Block `
+    -Profile Any
+
+# Disable LLMNR via registry
+Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\Windows NT\DNSClient" `
+    -Name "EnableMulticast" -Value 0 -Type DWord
+
+# Disable Function Discovery (SSDP/mDNS)
+Stop-Service fdPHost, FDResPub, SSDPSRV
+Set-Service fdPHost -StartupType Disabled
+Set-Service FDResPub -StartupType Disabled
+Set-Service SSDPSRV -StartupType Disabled
+
+Get-WmiObject -Class Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled } |
+ForEach-Object { $_.SetTcpipNetbios(2) }  # 2 = Disable
+
+
+Stop-Service DiagTrack, dmwappushservice
+Set-Service DiagTrack -StartupType Disabled
+Set-Service dmwappushservice -StartupType Disabled
+
+
+#AUDIT
+Get-NetTCPConnection | Where-Object { $_.State -eq "Listen" }
+Get-NetUDPEndpoint
+
+
+
+
+
+#______________________________________________
+#SCRIPT FOR AUTOMATION
+#______________________________________________
+
+
+# =========================
+# StealthOps.ps1
+# Tactical Local-Only System Framework
+# =========================
+
+# --- Initialization ---
+$LogPath = "$env:SystemDrive\StealthOps\Logs"
+$ConfigPath = "$env:SystemDrive\StealthOps\Config"
+$Timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+
+# --- Create Directories ---
+New-Item -ItemType Directory -Path $LogPath -Force | Out-Null
+New-Item -ItemType Directory -Path $ConfigPath -Force | Out-Null
+
+# --- Local Logging Function ---
+function Write-Log {
+    param([string]$Message)
+    $LogFile = "$LogPath\log_$Timestamp.txt"
+    Add-Content -Path $LogFile -Value "$Timestamp :: $Message"
+}
+
+# --- DNS Hardening ---
+function Harden-DNS {
+    Write-Log "Applying DNS lockdown"
+    Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses ("127.0.0.1")
+    # Optional: Point to local DNSCrypt or Unbound instance
+}
+
+# --- Firewall Ruleset ---
+function Configure-Firewall {
+    Write-Log "Configuring firewall rules"
+    New-NetFirewallRule -DisplayName "Block Telemetry" -Direction Outbound -RemoteAddress "settings-win.data.microsoft.com" -Action Block
+    New-NetFirewallRule -DisplayName "Block Cloud Sync" -Direction Outbound -RemoteAddress "onedrive.live.com" -Action Block
+    # Add more domains/IPs as needed
+}
+
+# --- Execution ---
+Write-Log "StealthOps initialized"
+Harden-DNS
+Configure-Firewall
+Write-Log "Setup complete"
+
+
+______________________________________________
+🧠 Design Notes
+
+-No cloud dependencies: All logs and configs are local-only.
+
+-Modular: Each function can be expanded into its own script module.
+
+-Silent footprint: No popups, no telemetry, no external calls.
+
+-Expandable: You can later add IDS hooks, encrypted local vaults, or flowchart-driven execution logic.
+
+Let’s break down each function in the script like a tactical briefing. 
+Each one is designed to serve a specific role in your stealth-first architecture:
+
+🔍 Write-Log
+
+-Purpose: Local-only logging with timestamp precision How it works:
+
+-Creates a log file in your designated $LogPath
+
+-Appends messages with a timestamp
+
+-Keeps all activity traceable only on your local drive—no cloud, no external calls
+
+-Why it matters: You control the narrative. 
+Every action gets logged, but only where you say so. Perfect for audit trails without exposure.
+
+🛡️ Harden-DNS
+
+-Purpose: DNS lockdown to prevent external resolution leaks How it works:
+
+-Forces your system to use 127.0.0.1 (localhost) for DNS queries
+
+-Optionally, you can redirect to a hardened local resolver like DNSCrypt or Unbound
+
+-Why it matters: No upstream DNS leaks. 
+You cut off the default pipeline to ISP or third-party resolvers, keeping your queries private and local.
+
+🔥 Configure-Firewall
+
+-Purpose: Block outbound telemetry and cloud sync attempts How it works:
+
+-Adds firewall rules to block known telemetry endpoints (e.g., Microsoft’s data collection domains)
+
+-Targets outbound traffic only, so your system can still receive updates if you allow it
+
+-Why it matters: This is your perimeter defense. You decide what leaves your system—and telemetry doesn’t make the cut.
+
+🧠 Execution Block
+
+-Purpose: Orchestrates the setup sequence How it works:
+
+-Logs the start of the operation
+
+-Executes DNS hardening and firewall configuration
+
+-Logs completion
+
+-Why it matters: Keeps your setup clean, traceable, and modular. 
+You can later expand this into a flowchart-driven execution model or wrap it in a GUI shell.
+
+_________________________________
+SUMMARY
+_________________________________
+
+
+
+#🛡️ 1. Disable LLMNR via Registry
+
+#powershell
+Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\Windows NT\DNSClient" `
+    -Name "EnableMulticast" -Value 0 -Type DWord
+
+
+#🔕 2. Disable Function Discovery & SSDP Services
+
+#powershell
+Stop-Service fdPHost, FDResPub, SSDPSRV -Force
+Set-Service fdPHost -StartupType Disabled
+Set-Service FDResPub -StartupType Disabled
+Set-Service SSDPSRV -StartupType Disabled
+#If SSDPSRV has dependents (like upnphost), disable them first:
+
+#powershell
+(Get-Service SSDPSRV).DependentServices | ForEach-Object {
+    Stop-Service $_.Name -Force
+    Set-Service $_.Name -StartupType Disabled
+}
+
+
+#📡 3. Scan for DNS/mDNS Activity
+
+#powershell
+netstat -an | findstr :53
+#This reveals active listeners on port 53 (DNS) and 5353 (mDNS).
+
+
+#🔥 4. Attempt to Disable DNS Cache (Blocked by Windows)
+
+#powershell
+Stop-Service dnscache -Force
+Set-Service dnscache -StartupType Disabled
+sc config dnscache start= disabled
+#All denied due to service protection.
+
+#🧨 5. Suppress DNS Caching via Registry (Effective Workaround)
+
+#powershell
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters" `
+    -Name "MaxCacheTtl" -PropertyType DWord -Value 0 -Force
+
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters" `
+    -Name "MaxNegativeCacheTtl" -PropertyType DWord -Value 0 -Force
+
+
+🔍 6. Verify DNS Cache Suppression
+
+#powershell
+Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters"
+ipconfig /flushdns
+ipconfig /displaydns
+nslookup example.com
+ipconfig /displaydns
+
+
+🧠 Optional: Scan Bonjour or Apple Services (if present)
+
+#powershell
+Get-Service | Where-Object { $_.DisplayName -like "*Bonjour*" }
+Stop-Service "Bonjour Service" -Force
+Set-Service "Bonjour Service" -StartupType Disabled
+
+
+#🧭 Tactical Summary
+	Goal		|		Method
+________________________|__________________________________________________
+Kill LLMNR		|	Registry edit
+			|
+Silence SSDP/mDNS	|	Stop & disable services + dependents
+			|
+Scan DNS/mDNS activity	|	netstat on ports 53 and 5353
+			|
+Disable DNS cache	|	Registry TTL suppression (safe workaround)
+			|
+Verify suppression	|	ipconfig, nslookup, registry check
+
